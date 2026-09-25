@@ -54,6 +54,14 @@ public class DynamicChatOverlay extends Overlay {
     private final ChatColorConfig chatColorConfig;
     private OverlayConfig overlayConfig;
 
+    /**
+     * Height returned by the previous {@link #render} call, or 0 when nothing was drawn.
+     * {@code OverlayRenderer} lays an overlay out from the size it reported last frame and only
+     * resizes its bounds after {@code render()} returns, so this is the height the renderer has
+     * actually allotted us on this frame.
+     */
+    private int lastReportedHeight;
+
     public DynamicChatOverlay(ChatWidgetPlugin plugin, ChatWidgetConfig globalConfig, Client client,
             ChatColorConfig chatColorConfig, OverlayConfig overlayConfig) {
         this.plugin = plugin;
@@ -84,6 +92,7 @@ public class DynamicChatOverlay extends Overlay {
     @Override
     public Dimension render(Graphics2D graphics) {
         if (!shouldRender()) {
+            lastReportedHeight = 0;
             return null;
         }
 
@@ -149,6 +158,7 @@ public class DynamicChatOverlay extends Overlay {
         List<TextSegment> inputSegments = buildInputPreviewSegments(metrics, fontSize, modIcons);
 
         if (renderableLines.isEmpty() && inputSegments == null) {
+            lastReportedHeight = 0;
             return null;
         }
 
@@ -173,6 +183,16 @@ public class DynamicChatOverlay extends Overlay {
         // wrapped at the pre-margin width, so the margins become empty space on either side.
         widgetWidth += marginLeft + marginRight;
 
+        // A bottom-anchored overlay is positioned from the height it reported on the *previous*
+        // frame, so a height change reaches the placement a frame late. Painting the new height
+        // into the old placement lifts every line by a row for that one frame, which is what makes
+        // a message look like it turns into the one below it just as it finishes fading out. Paint
+        // into the height we were actually given and let the new height take effect next frame,
+        // once the placement agrees with it. Player-following widgets position themselves below,
+        // from the live height, so they are unaffected.
+        int layoutHeight = (!followPlayer && lastReportedHeight > 0) ? lastReportedHeight : widgetHeight;
+        lastReportedHeight = followPlayer ? 0 : widgetHeight;
+
         if (followPlayer) {
             Player localPlayer = client.getLocalPlayer();
             if (localPlayer != null) {
@@ -185,21 +205,21 @@ public class DynamicChatOverlay extends Overlay {
                 if (playerPoint != null) {
                     int zoomOffset = calculateZoomOffset(positionMode);
                     int x = playerPoint.getX() - widgetWidth / 2;
-                    int y = playerPoint.getY() + zoomOffset - widgetHeight / 2;
+                    int y = playerPoint.getY() + zoomOffset - layoutHeight / 2;
                     graphics.translate(x - getBounds().x, y - getBounds().y);
                 }
             }
         }
 
         Shape originalClip = graphics.getClip();
-        graphics.setClip(0, 0, widgetWidth, widgetHeight + 4);
+        graphics.setClip(0, 0, widgetWidth, layoutHeight + 4);
 
         if (background.getAlpha() > 0) {
             graphics.setColor(background);
-            graphics.fillRect(0, 0, widgetWidth, widgetHeight);
+            graphics.fillRect(0, 0, widgetWidth, layoutHeight);
         }
 
-        int y = widgetHeight - bgPadding - marginBottom - metrics.getDescent();
+        int y = layoutHeight - bgPadding - marginBottom - metrics.getDescent();
 
         if (inputSegments != null) {
             drawSegments(graphics, inputSegments, 255, y, followPlayer, widgetWidth, bgPadding,
