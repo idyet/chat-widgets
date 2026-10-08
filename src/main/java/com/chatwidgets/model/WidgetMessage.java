@@ -18,25 +18,24 @@ public class WidgetMessage {
     private final String sender;
     private final String channelName;
     private final boolean outgoing;
-    private final int maxFadeSeconds;
     private int count = 1;
 
     public static WidgetMessage gameMessage(String message, long timestamp, ChatMessageType type, boolean bossKc) {
-        return new WidgetMessage(message, timestamp, type, bossKc, null, null, false, 0);
+        return new WidgetMessage(message, timestamp, type, bossKc, null, null, false);
     }
 
     public static WidgetMessage senderMessage(String sender, String channelName, String message, long timestamp,
             ChatMessageType type, boolean outgoing) {
-        return new WidgetMessage(message, timestamp, type, false, sender, channelName, outgoing, 0);
+        return new WidgetMessage(message, timestamp, type, false, sender, channelName, outgoing);
     }
 
-    public static WidgetMessage loginNotification(String sender, String message, long timestamp, int maxFadeSeconds) {
+    public static WidgetMessage loginNotification(String sender, String message, long timestamp) {
         return new WidgetMessage(message, timestamp, ChatMessageType.LOGINLOGOUTNOTIFICATION,
-                false, sender, null, false, maxFadeSeconds);
+                false, sender, null, false);
     }
 
     private WidgetMessage(String message, long timestamp, ChatMessageType type, boolean bossKc,
-            String sender, String channelName, boolean outgoing, int maxFadeSeconds) {
+            String sender, String channelName, boolean outgoing) {
         this.message = message;
         this.timestamp = timestamp;
         this.type = type;
@@ -44,7 +43,6 @@ public class WidgetMessage {
         this.sender = sender;
         this.channelName = channelName;
         this.outgoing = outgoing;
-        this.maxFadeSeconds = maxFadeSeconds;
     }
 
     public String getMessage() {
@@ -85,9 +83,5 @@ public class WidgetMessage {
 
     public void setCount(int count) {
         this.count = count;
-    }
-
-    public int getMaxFadeSeconds() {
-        return maxFadeSeconds;
     }
 }

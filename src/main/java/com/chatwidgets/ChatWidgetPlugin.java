@@ -661,9 +661,8 @@ public class ChatWidgetPlugin extends Plugin {
         // Create the new message
         WidgetMessage newMsg;
         if (type == ChatMessageType.LOGINLOGOUTNOTIFICATION) {
-            int maxFade = 5;
             newMsg = WidgetMessage.loginNotification(
-                    sender != null ? sender : "System", message, System.currentTimeMillis(), maxFade);
+                    sender != null ? sender : "System", message, System.currentTimeMillis());
         } else if (SENDER_TYPES.contains(type)) {
             newMsg = WidgetMessage.senderMessage(
                     sender != null ? sender : "Unknown", channelName, message, System.currentTimeMillis(), type, isOutgoing);
@@ -837,6 +836,7 @@ public class ChatWidgetPlugin extends Plugin {
         long fadeOutThreshold = fadeOutDuration > 0 ? (fadeOutDuration * 2000L) + 2000 : 0;
         boolean gameFilterEnabled = isGameFilterEnabled();
         boolean bossKcFilterEnabled = isBossKcFilterEnabled();
+        boolean loginLogoutHidden = isLoginLogoutHidden();
 
         int maxMessages = overlayConfig.getMaxMessages();
         List<WidgetMessage> filtered = new ArrayList<>(maxMessages);
@@ -849,12 +849,8 @@ public class ChatWidgetPlugin extends Plugin {
                 continue;
             }
 
-            if (fadeOutThreshold > 0) {
-                int msgMaxFade = msg.getMaxFadeSeconds();
-                long threshold = msgMaxFade > 0 ? (msgMaxFade * 1000L) + 2000 : fadeOutThreshold;
-                if (currentTime - msg.getTimestamp() >= threshold) {
-                    continue;
-                }
+            if (fadeOutThreshold > 0 && currentTime - msg.getTimestamp() >= fadeOutThreshold) {
+                continue;
             }
 
             if (gameFilterEnabled && msg.getType() == ChatMessageType.SPAM) {
@@ -865,16 +861,16 @@ public class ChatWidgetPlugin extends Plugin {
                 continue;
             }
 
-            // Login notifications don't count against max
-            boolean isLoginNotification = msg.getType() == ChatMessageType.LOGINLOGOUTNOTIFICATION;
-            if (!isLoginNotification && msgCount >= maxMessages) {
+            if (loginLogoutHidden && msg.getType() == ChatMessageType.LOGINLOGOUTNOTIFICATION) {
+                continue;
+            }
+
+            if (msgCount >= maxMessages) {
                 continue;
             }
 
             filtered.add(0, msg);
-            if (!isLoginNotification) {
-                msgCount++;
-            }
+            msgCount++;
         }
 
         return filtered;
@@ -985,6 +981,17 @@ public class ChatWidgetPlugin extends Plugin {
 
     public boolean isBossKcFilterEnabled() {
         return client.getVarbitValue(VarbitID.BOSS_KILLCOUNT_FILTERED) == 1;
+    }
+
+    /**
+     * True when the in-game "Friend login/logout messages" setting is Off. Mirrors cs2
+     * {@code ~loginlogout_setting_get}: 0 = timeout, 1 = always shown, 2 = off. Timeout vs always
+     * is ignored; the widget's own fade setting governs those.
+     */
+    public boolean isLoginLogoutHidden() {
+        int permanent = client.getVarbitValue(VarbitID.LOGINLOGOUT_PERMANENT);
+        int setting = permanent != 0 ? permanent : client.getVarbitValue(VarbitID.LOGINLOGOUT_SETTING);
+        return setting == 2;
     }
 
     private void updateDefaultPosition(net.runelite.client.ui.overlay.Overlay overlay) {

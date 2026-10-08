@@ -118,16 +118,7 @@ public class DynamicChatOverlay extends Overlay {
         for (int i = startIndex; i < messageCount; i++) {
             WidgetMessage msg = messages.get(i);
 
-            int msgMaxFade = msg.getMaxFadeSeconds();
-            long msgFadeThreshold;
-            if (msgMaxFade > 0) {
-                msgFadeThreshold = msgMaxFade * 1000L + 5000;
-            } else {
-                msgFadeThreshold = fadeOutThreshold;
-            }
-
-            if ((fadeOutDuration == 0 && msgMaxFade == 0)
-                    || (currentTime - msg.getTimestamp()) < msgFadeThreshold) {
+            if (fadeOutDuration == 0 || (currentTime - msg.getTimestamp()) < fadeOutThreshold) {
                 Color msgColor = getCategoryColour(msg.getType());
                 List<RenderLine> msgLines = ChatRenderUtils.buildMessageLines(msg, metrics,
                         widgetWidth, currentTime, fadeOutMs, wrapText, msgColor,
