@@ -32,10 +32,18 @@ public class ChatWidgetPanel extends PluginPanel {
 
     private final ChatWidgetPlugin plugin;
     private final Map<String, Boolean> collapsedState = new HashMap<>();
+    private JComponent debugSection;
+    private boolean debugCollapsed = true;
 
     public ChatWidgetPanel(ChatWidgetPlugin plugin) {
         super(false);
         this.plugin = plugin;
+        rebuild();
+    }
+
+    /** Shows a dev-only Debug section below the widgets, or removes it when null. */
+    public void setDebugSection(JComponent section) {
+        debugSection = section;
         rebuild();
     }
 
@@ -100,6 +108,10 @@ public class ChatWidgetPanel extends PluginPanel {
         // Overlay sections
         for (OverlayConfig oc : plugin.getOverlayConfigs()) {
             contentPanel.add(buildOverlaySection(oc));
+        }
+
+        if (debugSection != null) {
+            contentPanel.add(buildDebugSection());
         }
 
         // Wrap in a top-aligned container so items don't stretch vertically
@@ -289,6 +301,50 @@ public class ChatWidgetPanel extends PluginPanel {
         content.add(deleteButton);
 
         section.add(content);
+        return section;
+    }
+
+    private JPanel buildDebugSection() {
+        JPanel section = new JPanel();
+        section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+        section.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.setBorder(new CompoundBorder(
+                new MatteBorder(8, 0, 1, 0, ColorScheme.DARK_GRAY_COLOR),
+                new EmptyBorder(4, 4, 4, 4)
+        ));
+
+        JPanel headerRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        headerRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        headerRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        headerRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel arrow = new JLabel(debugCollapsed ? "⮞ " : "⮟ ");
+        arrow.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        JLabel nameLabel = new JLabel("Debug");
+        nameLabel.setForeground(ColorScheme.BRAND_ORANGE);
+        nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
+        headerRow.add(arrow);
+        headerRow.add(nameLabel);
+
+        debugSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+        debugSection.setVisible(!debugCollapsed);
+
+        headerRow.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                debugCollapsed = !debugCollapsed;
+                debugSection.setVisible(!debugCollapsed);
+                arrow.setText(debugCollapsed ? "⮞ " : "⮟ ");
+                section.revalidate();
+                section.repaint();
+            }
+        });
+
+        section.add(headerRow);
+        section.add(createStrut(4));
+        section.add(debugSection);
         return section;
     }
 

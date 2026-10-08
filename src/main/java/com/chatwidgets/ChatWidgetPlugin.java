@@ -44,6 +44,7 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.util.ImageUtil;
 
 import javax.inject.Inject;
+import javax.swing.JComponent;
 import java.awt.image.BufferedImage;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -190,6 +191,7 @@ public class ChatWidgetPlugin extends Plugin {
 
     private NavigationButton navButton;
     private ChatWidgetPanel panel;
+    private JComponent debugSection;
     private boolean pmWidgetsHidden = false;
     private boolean firstRun = false;
     private boolean updateNoticePending = false;
@@ -250,6 +252,7 @@ public class ChatWidgetPlugin extends Plugin {
         updatePmWidgetVisibility();
 
         panel = new ChatWidgetPanel(this);
+        panel.setDebugSection(debugSection);
         BufferedImage icon;
         try {
             icon = ImageUtil.loadImageResource(getClass(), "/panelicon.png");
@@ -281,6 +284,18 @@ public class ChatWidgetPlugin extends Plugin {
 
         if (navButton != null) {
             clientToolbar.removeNavigation(navButton);
+        }
+    }
+
+    /**
+     * Shows {@code section} in a collapsible Debug section at the bottom of the sidebar, or hides
+     * it when null. Only called by the developer-mode plugin under src/test, so the Hub build never
+     * shows it. Must be called on the Swing thread.
+     */
+    public void setDebugSection(JComponent section) {
+        debugSection = section;
+        if (panel != null) {
+            panel.setDebugSection(section);
         }
     }
 

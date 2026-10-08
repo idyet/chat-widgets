@@ -7,12 +7,11 @@ import net.runelite.api.ChatMessageType;
  * raw string as it arrives in {@code ChatMessage.getMessage()}, before any client expansion.
  */
 public enum DevMessagePreset {
-    ALL("All presets", null, "", "", ""),
-
     // #40: font tags other than col/img/br
     PVP_TRACKER_TAGS("Shadow, underline, <html> (#40)", ChatMessageType.GAMEMESSAGE, "", "",
-            "<html><shad=000000>PvP Performance Tracker <u>v.1.9.0</u> Update:</shad> Added Pete Kayer"
-                    + " fight tracking in his arena for both his Penultimate and Ultimate fights."),
+            "<html><shad=000000><col=ee4500>PvP Performance Tracker</col> <col=fa1500><u>v1.9.0</u></col>"
+                    + " <col=ee4500>Update:</col></shad> <col=842b00>Added Pete Kayer fight tracking in his arena"
+                    + " for both his Penultimate and Ultimate fights."),
     STRIKE_TAGS("Strikethrough (#40)", ChatMessageType.GAMEMESSAGE, "", "",
             "<str>default strike</str> <str=00ff00>green strike</str> <u=ff0000>red underline</u> plain"),
     BR_RESETS_STATE("<br> mid-underline (#40)", ChatMessageType.GAMEMESSAGE, "", "",
