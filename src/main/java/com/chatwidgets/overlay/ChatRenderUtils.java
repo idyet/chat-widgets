@@ -50,6 +50,10 @@ public final class ChatRenderUtils {
     private static final Pattern COL_END_PATTERN = Pattern.compile("</col>");
     private static final Pattern BR_TAG_PATTERN = Pattern.compile("<br>");
     private static final int MAX_MESSAGE_LENGTH = 500;
+    private static final Color CHANNEL_NAME_COLOUR = new Color(144, 144, 255);
+    // cs2 rebuildchatbox colours "Broadcast:" 0x30ff30 on the transparent chatbox.
+    private static final Color BROADCAST_LABEL_COLOUR = new Color(0x30ff30);
+    private static final String BROADCAST_LABEL = "Broadcast: ";
 
     private static IndexedSprite[] cachedModIconsRef;
     private static final Map<Integer, BufferedImage> iconImageCache = new HashMap<>();
@@ -240,21 +244,9 @@ public final class ChatRenderUtils {
                 headerWidth += metrics.stringWidth(prefix);
             }
 
-            if (showChannelName && msg.getChannelName() != null && !msg.getChannelName().isEmpty()) {
-                Color bracketColor = retainContextualColours ? Color.WHITE : textColor;
-                Color channelTextColor = retainContextualColours ? new Color(144, 144, 255) : textColor;
-
-                String open = "[";
-                headerSegments.add(new TextSegment(open, -1, metrics.stringWidth(open), bracketColor));
-                headerWidth += metrics.stringWidth(open);
-
-                String channelText = msg.getChannelName();
-                headerSegments.add(new TextSegment(channelText, -1, metrics.stringWidth(channelText), channelTextColor));
-                headerWidth += metrics.stringWidth(channelText);
-
-                String close = "] ";
-                headerSegments.add(new TextSegment(close, -1, metrics.stringWidth(close), bracketColor));
-                headerWidth += metrics.stringWidth(close);
+            if (showChannelName) {
+                headerWidth += addChannelTag(headerSegments, msg.getChannelName(), metrics,
+                        retainContextualColours, textColor);
             }
 
             List<TextSegment> senderSegments = parseTextWithIcons(msg.getSender(), metrics, modIcons,
@@ -266,6 +258,15 @@ public final class ChatRenderUtils {
 
             headerSegments.add(new TextSegment(": ", -1, metrics.stringWidth(": "), nameColor));
             headerWidth += metrics.stringWidth(": ");
+        } else if (type == ChatMessageType.BROADCAST) {
+            // Always shown, like the chatbox's label (not a channel name, so not toggleable).
+            Color labelColor = retainContextualColours ? BROADCAST_LABEL_COLOUR : textColor;
+            headerSegments.add(new TextSegment(BROADCAST_LABEL, -1, metrics.stringWidth(BROADCAST_LABEL), labelColor));
+            headerWidth += metrics.stringWidth(BROADCAST_LABEL);
+        } else if (showChannelName) {
+            // Clan notifications: [clan name], [GIM group name] or [PvP Arena], snapshotted at capture.
+            headerWidth += addChannelTag(headerSegments, msg.getClanTag(), metrics,
+                    retainContextualColours, textColor);
         }
 
         // Build message body
@@ -293,6 +294,31 @@ public final class ChatRenderUtils {
         }
 
         return lines;
+    }
+
+    /**
+     * Appends a {@code [name] } channel tag to {@code segments}, coloured like the chatbox's channel
+     * names. No-op for a null or empty name.
+     *
+     * @return the width added
+     */
+    private static int addChannelTag(List<TextSegment> segments, String name, FontMetrics metrics,
+            boolean retainContextualColours, Color textColor) {
+        if (name == null || name.isEmpty()) {
+            return 0;
+        }
+        Color bracketColor = retainContextualColours ? Color.WHITE : textColor;
+        Color channelTextColor = retainContextualColours ? CHANNEL_NAME_COLOUR : textColor;
+
+        String open = "[";
+        String close = "] ";
+        int openWidth = metrics.stringWidth(open);
+        int nameWidth = metrics.stringWidth(name);
+        int closeWidth = metrics.stringWidth(close);
+        segments.add(new TextSegment(open, -1, openWidth, bracketColor));
+        segments.add(new TextSegment(name, -1, nameWidth, channelTextColor));
+        segments.add(new TextSegment(close, -1, closeWidth, bracketColor));
+        return openWidth + nameWidth + closeWidth;
     }
 
     public static void addWrappedLines(List<RenderLine> lines, int alpha, List<TextSegment> headerSegments,

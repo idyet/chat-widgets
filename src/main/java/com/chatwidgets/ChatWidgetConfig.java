@@ -51,7 +51,7 @@ public interface ChatWidgetConfig extends Config {
         return false;
     }
 
-    @ConfigItem(keyName = "showChannelName", name = "Show Channel Names", description = "Show the channel name prefix for friends and clan chat messages", section = appearanceSection, position = 6)
+    @ConfigItem(keyName = "showChannelName", name = "Show Channel Names", description = "Show the channel name prefix for friends and clan chat messages, and the clan tag on clan notifications", section = appearanceSection, position = 6)
     default boolean showChannelName() {
         return true;
     }

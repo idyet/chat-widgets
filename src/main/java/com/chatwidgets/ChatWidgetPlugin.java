@@ -3,6 +3,7 @@ package com.chatwidgets;
 import com.chatwidgets.model.FontSize;
 import com.chatwidgets.model.MessageCategory;
 import com.chatwidgets.model.MessageMergeRule;
+import com.chatwidgets.model.MessageVariant;
 import com.chatwidgets.model.WidgetMessage;
 import com.chatwidgets.overlay.DynamicChatOverlay;
 import com.chatwidgets.overlay.OverlayConfig;
@@ -11,9 +12,13 @@ import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.EnumComposition;
 import net.runelite.api.GameState;
 import net.runelite.api.MessageNode;
 import net.runelite.api.Point;
+import net.runelite.api.clan.ClanChannel;
+import net.runelite.api.clan.ClanID;
+import net.runelite.api.clan.ClanSettings;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -77,6 +82,13 @@ public class ChatWidgetPlugin extends Plugin {
     private static final String PLUGIN_VERSION = "1.2.0";
     private static final String LAST_UPDATE_NOTICE_VERSION_KEY = "lastUpdateNoticeVersion";
     private static final int MAX_POOL_SIZE = 200;
+
+    // enum_63: base-36 broadcast link key -> URL (cs2 chat_broadcast_parseurl).
+    private static final int BROADCAST_URL_ENUM = 63;
+    // Clan id cs2 checks (activeclanchannel_find_affined(2)) before tagging a PvP Arena notification;
+    // ClanID has no constant for it.
+    private static final int PVP_ARENA_CLAN_ID = 2;
+    private static final String PVP_ARENA_TAG = "PvP Arena";
 
     private static final Pattern BOSS_KC_PATTERN = Pattern.compile("Your .+ count is:");
     private static final MessageMergeRule[] MESSAGE_MERGE_RULES = {
@@ -603,13 +615,23 @@ public class ChatWidgetPlugin extends Plugin {
         // converted yet at capture.
         MessageNode messageNode = event.getMessageNode();
         boolean emojiWatched = EMOJI_WATCHED_TYPES.contains(type)
-                && !message.startsWith("!")
+                && !parsePipes(type, message).getText().startsWith("!")
                 && isEmojiPluginEnabled();
         if (emojiWatched && messageNode != null) {
             String nodeValue = messageNode.getValue();
             if (nodeValue != null && !nodeValue.trim().isEmpty()) {
                 message = nodeValue.trim();
             }
+        }
+
+        // Split off the |-separated payload the chatbox hides (CA_ID:n|, GIM/PvP Arena prefixes,
+        // broadcast link keys). Everything below, including Chat Filter, boss KC, merging and
+        // duplicate collapse, sees display text. rawMessage stays the node-comparable original.
+        String rawMessage = message;
+        ChatPipeParser.Result parsed = parsePipes(type, rawMessage);
+        message = parsed.getText();
+        if (message.trim().isEmpty()) {
+            return;
         }
 
         // Drop messages matching the Chat Filter plugin's lists — only while that plugin is enabled.
@@ -665,10 +687,12 @@ public class ChatWidgetPlugin extends Plugin {
             newMsg = WidgetMessage.loginNotification(
                     sender != null ? sender : "System", message, System.currentTimeMillis(), maxFade);
         } else if (SENDER_TYPES.contains(type)) {
-            newMsg = WidgetMessage.senderMessage(
-                    sender != null ? sender : "Unknown", channelName, message, System.currentTimeMillis(), type, isOutgoing);
+            newMsg = WidgetMessage.senderMessage(sender != null ? sender : "Unknown", channelName, message,
+                    System.currentTimeMillis(), type, isOutgoing, parsed.getVariant());
         } else {
-            newMsg = WidgetMessage.gameMessage(message, System.currentTimeMillis(), type, isBossKc);
+            newMsg = WidgetMessage.gameMessage(message, System.currentTimeMillis(), type, isBossKc,
+                    parsed.getVariant(), parsed.getAchievementTaskId(), parsed.getBroadcastUrl(),
+                    clanTagFor(type, parsed.getVariant()));
         }
 
         // Collapse duplicates (except login notifications). newMsg isn't in the pool yet, so pass
@@ -685,12 +709,13 @@ public class ChatWidgetPlugin extends Plugin {
 
         // Track potential chat commands for delayed updates by Chat Commands plugin; otherwise
         // watch emoji-eligible messages for the Emojis plugin's next-tick <img=N> conversion.
+        // originalText is the raw (pre-split) text, since that is what the node accessors return.
         if (messageNode != null && message.startsWith("!")) {
             pendingUpdates.add(new PendingMessageUpdate(
-                    newMsg, messageNode, COMMAND_VALUE, message, COMMAND_UPDATE_TICKS));
+                    newMsg, messageNode, COMMAND_VALUE, rawMessage, COMMAND_UPDATE_TICKS));
         } else if (emojiWatched && messageNode != null) {
             pendingUpdates.add(new PendingMessageUpdate(
-                    newMsg, messageNode, EMOJI_VALUE, message, EMOJI_UPDATE_TICKS));
+                    newMsg, messageNode, EMOJI_VALUE, rawMessage, EMOJI_UPDATE_TICKS));
         }
     }
 
@@ -729,24 +754,26 @@ public class ChatWidgetPlugin extends Plugin {
 
     /**
      * Replaces the pooled {@code old} message with a copy carrying {@code newBody}, preserving its
-     * kind (sender vs game), count, and metadata. Re-applies duplicate collapsing afterwards: the
-     * body only reaches its final form here (a command result, or an Emojis {@code <img=N>} tag),
+     * kind, count, and metadata. The node value is raw, so it is split again first; otherwise a
+     * rewrite would bring a hidden {@code |} prefix back. Re-applies duplicate collapsing afterwards:
+     * the body only reaches its final form here (a command result, or an Emojis {@code <img=N>} tag),
      * so a duplicate the capture-time text couldn't match may only surface post-rewrite. No-op if
-     * {@code old} has already been evicted from the pool.
+     * {@code old} has already been evicted from the pool; a rewrite that is blank once split drops
+     * the message, as at capture.
      */
     private void rebuildPooledMessage(WidgetMessage old, String newBody) {
         int idx = messages.indexOf(old);
         if (idx < 0) {
             return;
         }
-        WidgetMessage updated;
-        if (old.getSender() != null) {
-            updated = WidgetMessage.senderMessage(
-                    old.getSender(), old.getChannelName(), newBody,
-                    old.getTimestamp(), old.getType(), old.isOutgoing());
-        } else {
-            updated = WidgetMessage.gameMessage(newBody, old.getTimestamp(), old.getType(), old.isBossKc());
+        // GIM membership snapshotted at capture (via the variant), so text and variant stay in step.
+        boolean inGim = old.getVariant() == MessageVariant.GIM;
+        String displayBody = ChatPipeParser.parse(old.getType(), newBody, inGim, this::lookupBroadcastUrl).getText();
+        if (displayBody.trim().isEmpty()) {
+            messages.remove(idx);
+            return;
         }
+        WidgetMessage updated = old.withMessage(displayBody);
         if (old.getCount() > 1) {
             updated.setCount(old.getCount());
         }
@@ -757,7 +784,45 @@ public class ChatWidgetPlugin extends Plugin {
         // in the pool, so skip its own slot and fold on top of the count it already carries.
         if (config.collapseDuplicates() && updated.getType() != ChatMessageType.LOGINLOGOUTNOTIFICATION) {
             updated.setCount(collapseDuplicate(
-                    messages, stripTags(newBody), updated.getSender(), updated.getCount(), idx));
+                    messages, stripTags(displayBody), updated.getSender(), updated.getCount(), idx));
+        }
+    }
+
+    /** Runs {@link ChatPipeParser} with this client's GIM membership and broadcast URL enum. */
+    private ChatPipeParser.Result parsePipes(ChatMessageType type, String raw) {
+        boolean inGim = type == ChatMessageType.CLAN_CHAT && isInGim();
+        return ChatPipeParser.parse(type, raw, inGim, this::lookupBroadcastUrl);
+    }
+
+    /** Mirrors cs2's GIM check for clan chat: GIM clan settings and channel both present. */
+    private boolean isInGim() {
+        return client.getClanSettings(ClanID.GROUP_IRONMAN) != null
+                && client.getClanChannel(ClanID.GROUP_IRONMAN) != null;
+    }
+
+    private String lookupBroadcastUrl(int key) {
+        EnumComposition urls = client.getEnum(BROADCAST_URL_ENUM);
+        return urls == null ? null : urls.getStringValue(key);
+    }
+
+    /**
+     * Clan name to tag a clan notification with, snapshotted from live clan state the way cs2
+     * picks it: main clan channel name, GIM clan settings name, or {@code PvP Arena} while in that
+     * channel. {@code null} for other types or when the player is not in the relevant clan.
+     */
+    private String clanTagFor(ChatMessageType type, MessageVariant variant) {
+        if (type != ChatMessageType.CLAN_MESSAGE && type != ChatMessageType.CLAN_GIM_MESSAGE) {
+            return null;
+        }
+        switch (variant) {
+            case GIM:
+                ClanSettings gim = client.getClanSettings(ClanID.GROUP_IRONMAN);
+                return gim == null ? null : gim.getName();
+            case PVP_ARENA:
+                return client.getClanChannel(PVP_ARENA_CLAN_ID) == null ? null : PVP_ARENA_TAG;
+            default:
+                ClanChannel clan = client.getClanChannel(ClanID.CLAN);
+                return clan == null ? null : clan.getName();
         }
     }
 
