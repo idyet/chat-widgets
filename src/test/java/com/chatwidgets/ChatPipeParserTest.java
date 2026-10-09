@@ -144,6 +144,25 @@ public class ChatPipeParserTest {
                 "Bob has logged in.", MessageVariant.GIM, null, null);
     }
 
+    /** RuneLite's event message: retyped to CLAN_GIM_MESSAGE with the leading | already stripped. */
+    @Test
+    public void clanGimMessageEventFormWithTaskId() {
+        assertResult(parse(ChatMessageType.CLAN_GIM_MESSAGE, "CA_ID:1|GIM test"),
+                "GIM test", MessageVariant.GIM, 1, null);
+    }
+
+    @Test
+    public void clanGimMessageEventFormPlain() {
+        assertResult(parse(ChatMessageType.CLAN_GIM_MESSAGE, "Bob has logged in."),
+                "Bob has logged in.", MessageVariant.GIM, null, null);
+    }
+
+    /** RuneLite's event message: retyped to CLAN_GIM_CHAT with the leading | already stripped. */
+    @Test
+    public void clanGimChatEventFormUntouched() {
+        assertResult(parse(ChatMessageType.CLAN_GIM_CHAT, "hi all"), "hi all", MessageVariant.GIM, null, null);
+    }
+
     @Test
     public void clanGimChatStripsLeadingPipe() {
         assertResult(parse(ChatMessageType.CLAN_GIM_CHAT, "|hi all"), "hi all", MessageVariant.GIM, null, null);

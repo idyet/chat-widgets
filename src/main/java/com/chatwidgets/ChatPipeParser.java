@@ -15,12 +15,18 @@ import java.util.function.IntFunction;
  *   <li>{@code GAMEMESSAGE}, {@code CLAN_MESSAGE}: split at the first {@code |}, show the right side;
  *       a {@code CA_ID:n} left side yields the achievement task id. {@code CLAN_MESSAGE} also
  *       recognises the GIM ({@code |text}) and PvP Arena ({@code p|text}) forms.</li>
- *   <li>{@code CLAN_GIM_MESSAGE}: GIM form, strip the leading {@code |} then split again.</li>
- *   <li>{@code CLAN_GIM_CHAT}, and {@code CLAN_CHAT} while in a GIM: strip the leading {@code |}.</li>
+ *   <li>{@code CLAN_GIM_MESSAGE}: GIM form, strip a leading {@code |} then split again.</li>
+ *   <li>{@code CLAN_GIM_CHAT}, and {@code CLAN_CHAT} while in a GIM: strip a leading {@code |}.</li>
  *   <li>{@code BROADCAST}: reversed, keeps the left side; the right side's first char is a base-36
  *       key into {@code enum_63}, and a resolved URL prefixes the text with {@code <img=12> }.</li>
  *   <li>Everything else is untouched.</li>
  * </ul>
+ *
+ * <p>RuneLite retypes a {@code CLAN_MESSAGE} / {@code CLAN_CHAT} starting with {@code |} to its GIM
+ * type and strips that {@code |} from the event message, but the {@link net.runelite.api.MessageNode}
+ * value keeps it. GIM text can therefore arrive with or without the leading pipe (event vs node, e.g.
+ * emoji seeding and next-tick reconcile), so it is stripped only when present. The {@code |} forms
+ * under {@code CLAN_MESSAGE} / {@code CLAN_CHAT} are defensive, in case that retyping changes.
  */
 public final class ChatPipeParser {
 
@@ -105,7 +111,7 @@ public final class ChatPipeParser {
         return Result.of(raw, MessageVariant.NORMAL);
     }
 
-    /** GIM form {@code |text} or {@code |CA_ID:n|text}: strip the leading pipe, then split again. */
+    /** GIM form {@code [|]text} or {@code [|]CA_ID:n|text}: strip a leading pipe, then split again. */
     private static Result gimNotification(String raw) {
         return splitShowRight(stripLeadingPipe(raw), MessageVariant.GIM);
     }
