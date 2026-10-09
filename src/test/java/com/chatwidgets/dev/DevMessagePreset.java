@@ -33,6 +33,31 @@ public enum DevMessagePreset {
     GAME_CA_ID("Game CA_ID prefix (#28)", ChatMessageType.GAMEMESSAGE, "", "",
             "CA_ID:565|Congratulations, you've completed a grandmaster combat task: Swimming in Venom."),
 
+    // #42: | separator. GIM types (CLAN_GIM_*, id -1) can't be injected directly; RuneLite retypes a
+    // CLAN_MESSAGE / CLAN_CHAT starting with | to its GIM type and strips that | from the event text.
+    GAME_CA_ID_NON_NUMERIC("Game CA_ID non-numeric (#42)", ChatMessageType.GAMEMESSAGE, "", "",
+            "CA_ID:abc|Task id is not numeric, text is still split."),
+    GAME_PIPE_BLANK("Game blank after split (#42)", ChatMessageType.GAMEMESSAGE, "", "",
+            "CA_ID:1|"),
+    GAME_PLUGIN_PIPE("Game plugin text a | b (#42)", ChatMessageType.GAMEMESSAGE, "", "",
+            "a | b"),
+    CLAN_PVP_ARENA("Clan PvP Arena p| (#42)", ChatMessageType.CLAN_MESSAGE, "", "Test Clan",
+            "p|PvP Arena test"),
+    GIM_MESSAGE_CA_ID("GIM message CA_ID (#42)", ChatMessageType.CLAN_MESSAGE, "", "Test Group",
+            "|CA_ID:1|GIM test"),
+    GIM_MESSAGE_PLAIN("GIM message plain (#42)", ChatMessageType.CLAN_MESSAGE, "", "Test Group",
+            "|Tester has logged in."),
+    GIM_CHAT("GIM chat (#42)", ChatMessageType.CLAN_CHAT, "Tester", "Test Group",
+            "|hello group"),
+    BROADCAST_LINK("Broadcast with link (#42)", ChatMessageType.BROADCAST, "", "",
+            "Test news|0"),
+    BROADCAST_BAD_KEY("Broadcast bad link key (#42)", ChatMessageType.BROADCAST, "", "",
+            "Test news, bad link key|!"),
+    BROADCAST_PLAIN("Broadcast no link (#42)", ChatMessageType.BROADCAST, "", "",
+            "Test news, no link"),
+    PLAYER_PIPE("Player chat | (#42)", ChatMessageType.PUBLICCHAT, "Tester", "",
+            "a|b should stay as typed"),
+
     // #28 / #37 / #29: colour macros
     MACRO_RED("@mes_hl_red@ macro (#28, #37)", ChatMessageType.GAMEMESSAGE, "", "",
             "@mes_hl_red@Your potion effect has run out.</col>"),
