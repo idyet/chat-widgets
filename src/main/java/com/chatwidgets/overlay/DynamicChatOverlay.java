@@ -321,7 +321,7 @@ public class DynamicChatOverlay extends Overlay {
                 }
             } else {
                 Color segmentColor = segment.color != null ? segment.color : Color.WHITE;
-                x += ChatRenderUtils.drawText(graphics, segment.text, segmentColor, alpha, x, y,
+                x += ChatRenderUtils.drawText(graphics, segment, segmentColor, alpha, x, y,
                         drawShadow, metrics);
             }
         }

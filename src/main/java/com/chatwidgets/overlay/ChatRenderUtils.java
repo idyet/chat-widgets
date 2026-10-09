@@ -33,8 +33,9 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>{@link #parseTextWithIcons} — handles {@code <img=N>} icon tags and entity references
  *       ({@code <lt>}, {@code <gt>}). Used for sender names.</li>
- *   <li>{@link #parseTextWithColoursAndIcons} — additionally handles {@code <col=RRGGBB>},
- *       {@code </col>}, {@code <br>}, and named colour tags. Used for message bodies.</li>
+ *   <li>{@link #parseTextWithColoursAndIcons} — additionally handles the game font's formatting
+ *       tags ({@code <col>}, {@code <str>}, {@code <u>}, {@code <shad>}, {@code <br>}), named
+ *       colour tags, and {@code <str_NAME=VALUE>} template variables. Used for message bodies.</li>
  * </ul>
  *
  * <p><b>Icon caching</b> — Converts RuneLite's {@link IndexedSprite} mod icons to
@@ -44,12 +45,11 @@ import java.util.regex.Pattern;
 public final class ChatRenderUtils {
 
     private static final Pattern IMG_TAG_PATTERN = Pattern.compile("<img=(\\d+)>");
-    private static final Pattern COL_TAG_PATTERN = Pattern.compile("<col=([0-9a-fA-F]{6})>");
-    private static final Pattern COL_NAMED_PATTERN = Pattern.compile("<col(NORMAL|HIGHLIGHT)>");
-    private static final Pattern COL_UNKNOWN_PATTERN = Pattern.compile("<col[^>]*>");
-    private static final Pattern COL_END_PATTERN = Pattern.compile("</col>");
-    private static final Pattern BR_TAG_PATTERN = Pattern.compile("<br>");
+    private static final Pattern TEMPLATE_DEF_PATTERN = Pattern.compile("<(str_[^=<>]+)=([^<>]*)>");
+    private static final Pattern TEMPLATE_REF_PATTERN = Pattern.compile("<(str_[^=<>]+)>");
     private static final int MAX_MESSAGE_LENGTH = 500;
+    /** The game font's strikethrough colour for a bare {@code <str>} tag. */
+    private static final Color DEFAULT_STRIKE_COLOR = new Color(0x800000);
 
     private static IndexedSprite[] cachedModIconsRef;
     private static final Map<Integer, BufferedImage> iconImageCache = new HashMap<>();
@@ -112,15 +112,32 @@ public final class ChatRenderUtils {
         return iconWidth + 2;
     }
 
-    public static int drawText(Graphics2D graphics, String text, Color color, int alpha, int x, int y,
+    /**
+     * Draws a text segment with its font decorations, matching the game's font renderer: the
+     * shadow is offset one pixel right and down, the strikethrough sits 70% of the ascent below
+     * the glyph top, and the underline one pixel below the baseline. A segment without its own
+     * shadow colour uses the base shadow ({@code drawShadow}: black or none).
+     */
+    public static int drawText(Graphics2D graphics, TextSegment segment, Color color, int alpha, int x, int y,
             boolean drawShadow, FontMetrics metrics) {
-        if (drawShadow) {
-            graphics.setColor(withAlpha(Color.BLACK, alpha));
+        String text = segment.text;
+        int width = metrics.stringWidth(text);
+        Color shadow = segment.shadowColor != null ? segment.shadowColor : (drawShadow ? Color.BLACK : null);
+        if (shadow != null) {
+            graphics.setColor(withAlpha(shadow, alpha));
             graphics.drawString(text, x + 2, y + 1);
         }
         graphics.setColor(withAlpha(color, alpha));
         graphics.drawString(text, x + 1, y);
-        return metrics.stringWidth(text);
+        if (segment.strikeColor != null) {
+            graphics.setColor(withAlpha(segment.strikeColor, alpha));
+            graphics.fillRect(x + 1, y - metrics.getAscent() + (int) (metrics.getAscent() * 0.7), width, 1);
+        }
+        if (segment.underlineColor != null) {
+            graphics.setColor(withAlpha(segment.underlineColor, alpha));
+            graphics.fillRect(x + 1, y + 1, width, 1);
+        }
+        return width;
     }
 
     public static int calculateAlpha(WidgetMessage msg, long currentTime, long fadeOutMs) {
@@ -269,7 +286,8 @@ public final class ChatRenderUtils {
         }
 
         // Build message body
-        String messageText = msg.getMessage();
+        // Expand templates before truncating, so a long definition can't push its value past the cut.
+        String messageText = expandTemplates(msg.getMessage());
         if (messageText != null && messageText.length() > MAX_MESSAGE_LENGTH) {
             messageText = messageText.substring(0, MAX_MESSAGE_LENGTH) + "...";
         }
@@ -359,8 +377,11 @@ public final class ChatRenderUtils {
     }
 
     /**
-     * Parses text with full color tag support, icon tags, and line breaks.
-     * Used for system/game messages that can contain color formatting.
+     * Parses text with full chat formatting tag support, icon tags, and line breaks.
+     * Used for system/game messages that can contain formatting. Tags follow the game's font
+     * renderer ({@code AbstractFont.decodeTag}): only {@code col=} and {@code img=} are prefix
+     * matches, every bare tag must match exactly, and any unrecognised tag is skipped silently.
+     * Template variables are expanded first (see {@link #expandTemplates}).
      */
     public static List<TextSegment> parseTextWithColoursAndIcons(String text, FontMetrics metrics,
             IndexedSprite[] modIcons, boolean retainContextualColours, Color textColor,
@@ -370,104 +391,190 @@ public final class ChatRenderUtils {
             return segments;
         }
 
-        Color currentColor = textColor;
-        StringBuilder currentText = new StringBuilder();
+        text = expandTemplates(text);
+        SegmentBuilder builder = new SegmentBuilder(segments, metrics, textColor);
         int i = 0;
 
         while (i < text.length()) {
-            Matcher imgMatcher = IMG_TAG_PATTERN.matcher(text.substring(i));
-            Matcher colMatcher = COL_TAG_PATTERN.matcher(text.substring(i));
-            Matcher colNamedMatcher = COL_NAMED_PATTERN.matcher(text.substring(i));
-            Matcher colEndMatcher = COL_END_PATTERN.matcher(text.substring(i));
-            Matcher brMatcher = BR_TAG_PATTERN.matcher(text.substring(i));
+            char c = text.charAt(i);
+            int tagEnd = c == '<' ? text.indexOf('>', i + 1) : -1;
+            if (tagEnd < 0) {
+                builder.text.append(c);
+                i++;
+                continue;
+            }
 
-            if (brMatcher.lookingAt()) {
-                if (currentText.length() > 0) {
-                    String str = currentText.toString();
-                    segments.add(new TextSegment(str, -1, metrics.stringWidth(str), currentColor));
-                    currentText = new StringBuilder();
-                }
-                segments.add(new TextSegment("", TextSegment.LINE_BREAK, 0, currentColor));
-                i += brMatcher.end();
-            } else if (imgMatcher.lookingAt()) {
-                if (currentText.length() > 0) {
-                    String str = currentText.toString();
-                    segments.add(new TextSegment(str, -1, metrics.stringWidth(str), currentColor));
-                    currentText = new StringBuilder();
-                }
-                try {
-                    int iconId = Integer.parseInt(imgMatcher.group(1));
-                    int iconWidth = calculateIconWidth(modIcons, iconId, fontSize);
-                    segments.add(new TextSegment("", iconId, iconWidth, currentColor));
-                } catch (NumberFormatException e) {
-                    currentText.append(imgMatcher.group(0));
-                }
-                i += imgMatcher.end();
-            } else if (colNamedMatcher.lookingAt()) {
-                if (currentText.length() > 0) {
-                    String str = currentText.toString();
-                    segments.add(new TextSegment(str, -1, metrics.stringWidth(str), currentColor));
-                    currentText = new StringBuilder();
-                }
-                String colorName = colNamedMatcher.group(1);
-                if ("NORMAL".equals(colorName)) {
-                    currentColor = textColor;
-                } else if ("HIGHLIGHT".equals(colorName) && chatColorConfig != null) {
-                    Color highlight = chatColorConfig.transparentExamineHighlight();
-                    currentColor = highlight != null ? highlight : textColor;
-                }
-                i += colNamedMatcher.end();
-            } else if (colMatcher.lookingAt() && retainContextualColours) {
-                if (currentText.length() > 0) {
-                    String str = currentText.toString();
-                    segments.add(new TextSegment(str, -1, metrics.stringWidth(str), currentColor));
-                    currentText = new StringBuilder();
-                }
-                try {
-                    currentColor = Color.decode("#" + colMatcher.group(1));
-                } catch (NumberFormatException e) {
-                    currentColor = textColor;
-                }
-                i += colMatcher.end();
-            } else if (colEndMatcher.lookingAt() && retainContextualColours) {
-                if (currentText.length() > 0) {
-                    String str = currentText.toString();
-                    segments.add(new TextSegment(str, -1, metrics.stringWidth(str), currentColor));
-                    currentText = new StringBuilder();
-                }
-                currentColor = textColor;
-                i += colEndMatcher.end();
-            } else if (colMatcher.lookingAt()) {
-                i += colMatcher.end();
-            } else if (colEndMatcher.lookingAt()) {
-                i += colEndMatcher.end();
-            } else if (text.startsWith("<lt>", i)) {
-                currentText.append('<');
-                i += 4;
-            } else if (text.startsWith("<gt>", i)) {
-                currentText.append('>');
-                i += 4;
-            } else if (text.startsWith("<at>", i)) {
+            String tag = text.substring(i + 1, tagEnd);
+            i = tagEnd + 1;
+
+            if (tag.equals("br") || tag.equals("n")) {
+                builder.lineBreak();
+            } else if (tag.equals("lt")) {
+                builder.text.append('<');
+            } else if (tag.equals("gt")) {
+                builder.text.append('>');
+            } else if (tag.equals("nbh")) {
+                builder.text.append('-');
+            } else if (tag.equals("at")) {
                 // RuneLite escapes a literal '@' as <at> so it isn't parsed as an @col@ colour code.
-                currentText.append('@');
-                i += 4;
-            } else {
-                Matcher colUnknownMatcher = COL_UNKNOWN_PATTERN.matcher(text.substring(i));
-                if (colUnknownMatcher.lookingAt()) {
-                    i += colUnknownMatcher.end();
-                } else {
-                    currentText.append(text.charAt(i));
-                    i++;
+                builder.text.append('@');
+            } else if (tag.equals("colNORMAL")) {
+                builder.setColor(textColor);
+            } else if (tag.equals("colHIGHLIGHT")) {
+                if (chatColorConfig != null) {
+                    Color highlight = chatColorConfig.transparentExamineHighlight();
+                    builder.setColor(highlight != null ? highlight : textColor);
                 }
+            } else if (tag.startsWith("col=")) {
+                Color color = parseHexColor(tag.substring(4));
+                if (color != null && retainContextualColours) {
+                    builder.setColor(color);
+                }
+            } else if (tag.equals("/col")) {
+                if (retainContextualColours) {
+                    builder.setColor(textColor);
+                }
+            } else if (tag.equals("str")) {
+                builder.setStrike(DEFAULT_STRIKE_COLOR);
+            } else if (tag.startsWith("str=")) {
+                Color color = parseHexColor(tag.substring(4));
+                if (color != null) {
+                    builder.setStrike(color);
+                }
+            } else if (tag.equals("/str")) {
+                builder.setStrike(null);
+            } else if (tag.equals("u")) {
+                builder.setUnderline(Color.BLACK);
+            } else if (tag.startsWith("u=")) {
+                Color color = parseHexColor(tag.substring(2));
+                if (color != null) {
+                    builder.setUnderline(color);
+                }
+            } else if (tag.equals("/u")) {
+                builder.setUnderline(null);
+            } else if (tag.equals("shad")) {
+                builder.setShadow(Color.BLACK);
+            } else if (tag.startsWith("shad=")) {
+                Color color = parseHexColor(tag.substring(5));
+                if (color != null) {
+                    builder.setShadow(color);
+                }
+            } else if (tag.equals("/shad")) {
+                builder.setShadow(null);
+            } else if (tag.startsWith("img=")) {
+                try {
+                    int iconId = Integer.parseInt(tag.substring(4));
+                    builder.icon(iconId, calculateIconWidth(modIcons, iconId, fontSize));
+                } catch (NumberFormatException e) {
+                    // Bad icon id: the game's font ignores the tag, and so do we.
+                }
+            }
+            // Any other tag (e.g. <html>) is invisible in-game: skip it.
+        }
+
+        builder.flush();
+        return segments;
+    }
+
+    private static Color parseHexColor(String hex) {
+        try {
+            return new Color(Integer.parseInt(hex, 16));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Accumulates text under the current formatting state, flushing a segment on each change. */
+    private static final class SegmentBuilder {
+        private final List<TextSegment> segments;
+        private final FontMetrics metrics;
+        private final Color baseColor;
+        private final StringBuilder text = new StringBuilder();
+        private Color color;
+        private Color strike;
+        private Color underline;
+        private Color shadow;
+
+        SegmentBuilder(List<TextSegment> segments, FontMetrics metrics, Color baseColor) {
+            this.segments = segments;
+            this.metrics = metrics;
+            this.baseColor = baseColor;
+            this.color = baseColor;
+        }
+
+        void flush() {
+            if (text.length() > 0) {
+                String str = text.toString();
+                segments.add(new TextSegment(str, -1, metrics.stringWidth(str), color,
+                        strike, underline, shadow));
+                text.setLength(0);
             }
         }
 
-        if (currentText.length() > 0) {
-            String str = currentText.toString();
-            segments.add(new TextSegment(str, -1, metrics.stringWidth(str), currentColor));
+        void setColor(Color newColor) {
+            flush();
+            color = newColor;
         }
 
-        return segments;
+        void setStrike(Color newStrike) {
+            flush();
+            strike = newStrike;
+        }
+
+        void setUnderline(Color newUnderline) {
+            flush();
+            underline = newUnderline;
+        }
+
+        void setShadow(Color newShadow) {
+            flush();
+            shadow = newShadow;
+        }
+
+        void icon(int iconId, int width) {
+            flush();
+            segments.add(new TextSegment("", iconId, width, color));
+        }
+
+        /** A line break, which also resets all formatting to the line's base state. */
+        void lineBreak() {
+            flush();
+            color = baseColor;
+            strike = null;
+            underline = null;
+            shadow = null;
+            segments.add(new TextSegment("", TextSegment.LINE_BREAK, 0, color));
+        }
+    }
+
+    /**
+     * Expands the game's template variables: each {@code <str_NAME=VALUE>} definition is removed
+     * and every later {@code <str_NAME>} reference is replaced with its value. The client does this
+     * before setting chatbox widget text, but the raw template is all RuneLite exposes, so it must
+     * run before tag parsing (whose unknown-tag catch-all would otherwise delete the value).
+     */
+    public static String expandTemplates(String text) {
+        if (text == null || !text.contains("<str_")) {
+            return text;
+        }
+
+        Map<String, String> vars = new HashMap<>();
+        Matcher defMatcher = TEMPLATE_DEF_PATTERN.matcher(text);
+        StringBuffer withoutDefs = new StringBuffer();
+        while (defMatcher.find()) {
+            vars.put(defMatcher.group(1), defMatcher.group(2));
+            defMatcher.appendReplacement(withoutDefs, "");
+        }
+        defMatcher.appendTail(withoutDefs);
+
+        Matcher refMatcher = TEMPLATE_REF_PATTERN.matcher(withoutDefs);
+        StringBuffer expanded = new StringBuffer();
+        while (refMatcher.find()) {
+            String value = vars.getOrDefault(refMatcher.group(1), refMatcher.group(0));
+            refMatcher.appendReplacement(expanded, Matcher.quoteReplacement(value));
+        }
+        refMatcher.appendTail(expanded);
+        return expanded.toString();
     }
 
     public static List<List<TextSegment>> wrapSegments(List<TextSegment> segments,
@@ -503,7 +610,7 @@ public final class ChatRenderUtils {
                     if (word.isEmpty() && wi < words.length - 1) {
                         int spaceWidth = metrics.stringWidth(" ");
                         if (spaceWidth <= currentWidth) {
-                            currentLine.add(new TextSegment(" ", -1, spaceWidth, segment.color));
+                            currentLine.add(segment.withText(" ", spaceWidth));
                             currentWidth -= spaceWidth;
                         }
                         continue;
@@ -516,10 +623,10 @@ public final class ChatRenderUtils {
 
                     if (neededWidth <= currentWidth) {
                         if (needsSpace) {
-                            currentLine.add(new TextSegment(" ", -1, spaceWidth, segment.color));
+                            currentLine.add(segment.withText(" ", spaceWidth));
                             currentWidth -= spaceWidth;
                         }
-                        currentLine.add(new TextSegment(word, -1, wordWidth, segment.color));
+                        currentLine.add(segment.withText(word, wordWidth));
                         currentWidth -= wordWidth;
                     } else {
                         if (!currentLine.isEmpty()) {
@@ -527,7 +634,7 @@ public final class ChatRenderUtils {
                             currentLine = new ArrayList<>();
                             currentWidth = subsequentLineWidth;
                         }
-                        currentLine.add(new TextSegment(word, -1, wordWidth, segment.color));
+                        currentLine.add(segment.withText(word, wordWidth));
                         currentWidth -= wordWidth;
                     }
                 }
