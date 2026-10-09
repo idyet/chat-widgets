@@ -21,6 +21,7 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayMenuEntry;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.util.Text;
 
 import java.awt.Color;
 import java.awt.Dimension;
@@ -381,6 +382,8 @@ public class DynamicChatOverlay extends Overlay {
         if (local == null || local.getName() == null) {
             return null;
         }
-        return local.getName() + ": " + (typed != null ? typed : "") + "*";
+        // The raw varc holds what the player typed, unescaped: escape it so a typed '<' isn't
+        // parsed as a formatting tag.
+        return local.getName() + ": " + (typed != null ? Text.escapeJagex(typed) : "") + "*";
     }
 }

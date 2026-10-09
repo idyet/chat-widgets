@@ -187,4 +187,14 @@ public class ChatFormattingTagsTest {
             }
         }
     }
+
+    /** Without contextual colours, <col> is ignored but decorations keep their tag colours. */
+    @Test
+    public void decorationsApplyWithoutContextualColours() {
+        List<TextSegment> segs = ChatRenderUtils.parseTextWithColoursAndIcons(
+                "<col=ff0000><u=00ff00>a", metrics, null, false, Color.WHITE, FontSize.REGULAR, null);
+        TextSegment a = segment(segs, "a");
+        assertEquals(Color.WHITE, a.color);
+        assertEquals(new Color(0x00ff00), a.underlineColor);
+    }
 }

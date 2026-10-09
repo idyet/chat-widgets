@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>{@link #parseTextWithIcons} — handles {@code <img=N>} icon tags and entity references
  *       ({@code <lt>}, {@code <gt>}). Used for sender names.</li>
- *   <li>{@link #parseTextWithColoursAndIcons} — additionally handles the game font's formatting
+ *   <li>{@link #parseTextWithColoursAndIcons}: additionally handles the game font's formatting
  *       tags ({@code <col>}, {@code <str>}, {@code <u>}, {@code <shad>}, {@code <br>}), named
  *       colour tags, and {@code <str_NAME=VALUE>} template variables. Used for message bodies.</li>
  * </ul>
@@ -379,9 +379,11 @@ public final class ChatRenderUtils {
     /**
      * Parses text with full chat formatting tag support, icon tags, and line breaks.
      * Used for system/game messages that can contain formatting. Tags follow the game's font
-     * renderer ({@code AbstractFont.decodeTag}): only {@code col=} and {@code img=} are prefix
-     * matches, every bare tag must match exactly, and any unrecognised tag is skipped silently.
-     * Template variables are expanded first (see {@link #expandTemplates}).
+     * renderer ({@code AbstractFont.decodeTag}): only {@code col=}, {@code str=}, {@code u=},
+     * {@code shad=} and {@code img=} are prefix matches, every bare tag must match exactly, and any
+     * unrecognised tag is skipped silently. Template variables are expanded first (see
+     * {@link #expandTemplates}). {@code retainContextualColours} gates only the text colour
+     * ({@code <col>} tags); strikethrough, underline and shadow always keep their tag colours.
      */
     public static List<TextSegment> parseTextWithColoursAndIcons(String text, FontMetrics metrics,
             IndexedSprite[] modIcons, boolean retainContextualColours, Color textColor,
@@ -399,7 +401,7 @@ public final class ChatRenderUtils {
             char c = text.charAt(i);
             int tagEnd = c == '<' ? text.indexOf('>', i + 1) : -1;
             if (tagEnd < 0) {
-                builder.text.append(c);
+                builder.append(c);
                 i++;
                 continue;
             }
@@ -410,14 +412,14 @@ public final class ChatRenderUtils {
             if (tag.equals("br") || tag.equals("n")) {
                 builder.lineBreak();
             } else if (tag.equals("lt")) {
-                builder.text.append('<');
+                builder.append('<');
             } else if (tag.equals("gt")) {
-                builder.text.append('>');
+                builder.append('>');
             } else if (tag.equals("nbh")) {
-                builder.text.append('-');
+                builder.append('-');
             } else if (tag.equals("at")) {
                 // RuneLite escapes a literal '@' as <at> so it isn't parsed as an @col@ colour code.
-                builder.text.append('@');
+                builder.append('@');
             } else if (tag.equals("colNORMAL")) {
                 builder.setColor(textColor);
             } else if (tag.equals("colHIGHLIGHT")) {
@@ -462,11 +464,9 @@ public final class ChatRenderUtils {
             } else if (tag.equals("/shad")) {
                 builder.setShadow(null);
             } else if (tag.startsWith("img=")) {
-                try {
-                    int iconId = Integer.parseInt(tag.substring(4));
+                Integer iconId = parseIconId(tag.substring(4));
+                if (iconId != null) {
                     builder.icon(iconId, calculateIconWidth(modIcons, iconId, fontSize));
-                } catch (NumberFormatException e) {
-                    // Bad icon id: the game's font ignores the tag, and so do we.
                 }
             }
             // Any other tag (e.g. <html>) is invisible in-game: skip it.
@@ -474,6 +474,15 @@ public final class ChatRenderUtils {
 
         builder.flush();
         return segments;
+    }
+
+    /** Returns the icon id, or null if it isn't a number (the game's font then ignores the tag). */
+    private static Integer parseIconId(String id) {
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static Color parseHexColor(String hex) {
@@ -500,6 +509,10 @@ public final class ChatRenderUtils {
             this.metrics = metrics;
             this.baseColor = baseColor;
             this.color = baseColor;
+        }
+
+        void append(char c) {
+            text.append(c);
         }
 
         void flush() {
